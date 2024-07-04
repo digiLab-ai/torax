@@ -27,6 +27,7 @@ from torax.config import runtime_params_slice
 from torax.sources import formulas
 from torax.sources import runtime_params as runtime_params_lib
 from torax.sources import source
+import gpjax as gpx
 
 
 # pylint: disable=invalid-name
@@ -67,16 +68,44 @@ def _calc_puff_source(
 ) -> jnp.ndarray:
   """Calculates external source term for n from puffs."""
   assert isinstance(dynamic_source_runtime_params, DynamicGasPuffRuntimeParams)
+  x = jnp.array([[16.0]])
+  y1 = jnp.array([[0.3]])
+  y2 = jnp.array([[6e21]])
+  y = jnp.hstack([y1, y2]).reshape(1, -1)
+  D = gpx.Dataset(X=x, y=y1)
+
+  kernel = gpx.kernels.RBF()
+  meanf = gpx.mean_functions.Zero()
+  prior = gpx.gps.Prior(mean_function=meanf, kernel=kernel)
+
+  likelihood = gpx.likelihoods.Gaussian(num_datapoints=D.n)
+  posterior = prior * likelihood
+
+  test_inputs = jnp.array([[16.5]])
+  post_dist = posterior.predict(test_inputs=test_inputs, train_data=D)
+  y_mean = post_dist.mean()
+
   return formulas.exponential_profile(
       c1=1.0,
-      c2=dynamic_source_runtime_params.puff_decay_length,
+      c2=y_mean[0],
       total=(
-          dynamic_source_runtime_params.S_puff_tot
+          6e21
           / dynamic_runtime_params_slice.numerics.nref
       ),
       use_normalized_r=True,
       geo=geo,
   )
+
+  # return formulas.exponential_profile(
+    #     c1=1.0,
+    #     c2=dynamic_source_runtime_params.puff_decay_length,
+    #     total=(
+    #         dynamic_source_runtime_params.S_puff_tot
+    #         / dynamic_runtime_params_slice.numerics.nref
+    #     ),
+    #     use_normalized_r=True,
+    #     geo=geo,
+    # )
 
 
 @dataclasses.dataclass(kw_only=True)
